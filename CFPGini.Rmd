@@ -1,0 +1,407 @@
+---
+title: "CFPGini"
+author: "Molly McCann"
+date: "2024-12-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(cfbfastR)
+library(Gini)
+library(ineq)
+library(stringr)
+```
+
+```{r}
+cfb_data <- load_cfb_pbp(seasons = 2024)
+
+cfb_data <- as.data.frame(cfb_data)
+```
+
+
+Gini index: WPA and EPA scores for games where Team A is favored to win vs. when team A is not favored to win by CFP rankings
+
+## Segement data by team, then combine each segment into CFP dataset 
+```{r}
+# Define the list of target teams
+playoff_teams <- c("Notre Dame", "Indiana", "Oregon", "Clemson", 
+                  "Arizona State", "Penn State", "Boise State", 
+                  "Ohio State", "Tennessee", "Georgia", "Texas", "SMU")
+```
+
+```{r}
+# Filter PBP data for the specified teams
+team_data <- cfb_data |>
+  filter(home %in% playoff_teams | away %in% playoff_teams)
+```
+
+```{r}
+team_data_cfp <- team_data |>
+  filter(week >= 10)
+```
+
+```{r}
+all_games <- c(unique(team_data_cfp$game_id))
+```
+
+```{r}
+# Function to get home and away teams for each unique game_id
+get_game_teams <- function(data) {
+  data |>
+    group_by(game_id) |>
+    summarise(
+      home_team = first(home),
+      away_team = first(away),
+      week_number = first(week),
+      .groups = "drop"
+    )
+}
+```
+
+```{r}
+# Extract game teams from cfb_data
+game_teams <- get_game_teams(team_data_cfp)
+game_teams
+```
+
+```{r}
+assign_favorite <- function(team_data, game_id, team_name) {
+  team_data <- team_data %>%
+    mutate(favorite = if_else(game_id == game_id, team_name, favorite))
+  return(team_data)
+}
+```
+
+```{r}
+# Week 13 - Wyoming vs Boise State
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401643764, team_name = "Boise State")
+
+# Week 14 - Boise State vs Oregon State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401643769, team_name = "Boise State")
+
+# Week 15 - SMU vs Clemson
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401673463, team_name = "SMU")
+
+# Week 15 - Oregon vs Penn State
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401673464, team_name = "Oregon")
+
+# Week 15 - Arizona State vs Iowa State
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401673465, team_name = "Arizona State")
+
+# Week 15 - Boise State vs UNLV  
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401673468, team_name = "Boise State")
+
+# Week 15 - Texas vs Georgia 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401673469, team_name = "Georgia")
+```
+
+```{r}
+# Week 10 - SMU vs Pittsburgh 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401635627, team_name = "SMU")
+
+# Week 10 - Oklahoma State vs Arizona State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401636915, team_name = "Arizona State")
+
+# Week 11 - Arizona State vs UCF
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401636917, team_name = "Arizona State")
+
+# Week 12 - Kansas State vs Arizona State
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401636927, team_name = "Arizona State")
+
+# Week 13 - Arizona State vs BYU
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401636930, team_name = "Arizona State")
+
+# Week 14 - Arizona vs Arizona State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401636940, team_name = "Arizona State")
+
+# Week 13 - Notre Dame vs Army
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401640959, team_name = "Notre Dame")
+
+# Week 10 - Boise State vs San Diego State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401643747, team_name = "Boise State")
+
+# Week 11 - Boise State vs Nevada 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401643752, team_name = "Boise State")
+
+# Week 12 - San Jose State vs Boise State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401643758, team_name = "Boise State")
+```
+
+```{r}
+# Week 14 - USC vs Notre Dame
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628571, team_name = "Notre Dame")
+
+# Week 11 - Notre Dame vs Florida State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628984, team_name = "Notre Dame")
+
+# Week 12 - Notre Dame vs Virginia 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628985, team_name = "Notre Dame")
+
+# Week 12 - SMU vs Boston College 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401635580, team_name = "SMU")
+
+# Week 12 - Pittsburgh vs Clemson 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401635582, team_name = "Clemson")
+
+# Week 10 - Clemson vs Louisville 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401635600, team_name = "Clemson")
+
+# Week 11 - Virginia Tech vs Clemson 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401635607, team_name = "Clemson")
+
+# Week 13 - Clemson vs The Citadel
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401635614, team_name = "Clemson")
+
+# Week 13 - Virginia vs SMU
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401635619, team_name = "SMU")
+
+# Week 14 - SMU vs California
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401635621, team_name = "SMU")
+```
+
+```{r}
+# Week 11 - Penn State vs Washington 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628546, team_name = "Penn State")
+
+# Week 12 - Northwestern vs Ohio State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628550, team_name = "Ohio State")
+
+# Week 12 - Wisconsin vs Oregon 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628551, team_name = "Oregon")
+
+# Week 12 - Purdue vs Penn State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628552, team_name = "Penn State")
+
+# Week 13 - Ohio State vs Indiana
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628555, team_name = "Ohio State")
+
+# Week 13 - Minnesota vs Penn State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628559, team_name = "Penn State")
+
+# Week 14 - Indiana vs Purdue 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628564, team_name = "Indiana")
+
+# Week 14 - Penn State vs Maryland 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628565, team_name = "Penn State")
+
+# Week 14 - Ohio State vs Michigan 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628566, team_name = "Ohio State")
+
+# Week 14 - Oregon vs Washington 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628569, team_name = "Oregon")
+```
+
+```{r}
+# Week 14 - Georgia vs Georgia Tech
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628439, team_name = "Georgia")
+
+# Week 14 - Clemson vs South Carolina 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628444, team_name = "Clemson")
+
+# Week 14 -  Texas AM vs Texas
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628445, team_name = "Texas")
+
+# Week 14 -  Vanderbilt vs Tennessee
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628446, team_name = "Tennessee")
+
+# Week 10 - Michigan State vs Indiana 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628534, team_name = "Indiana")
+
+# Week 10 -  Michigan vs Oregon 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628536, team_name = "Oregon")
+
+# Week 10 -  Penn State vs Ohio State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628539, team_name = "Ohio State")
+
+# Week 11 -  Indiana vs Michigan 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628541, team_name = "Indiana")
+
+# Week 11 - Oregon vs Maryland 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628543, team_name = "Oregon")
+
+# Week 11 - Ohio State vs Purdue 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628545, team_name = "Ohio State")
+```
+
+```{r}
+# Week 10 - Georgia vs Florida 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628408, team_name = "Georgia")
+
+# Week 10 - Tennessee vs Kentucky 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628412, team_name = "Tennessee")
+
+# Week 11 - Ole Miss vs Georgia 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628414, team_name = "Ole Miss")
+
+# Week 11 - Tennessee vs Mississippi State 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628416, team_name = "Tennessee")
+
+# Week 11 - Texas vs Florida 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628417, team_name = "Texas")
+
+# Week 12 - Arkansas vs Texas 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628419, team_name = "Texas")
+
+# Week 12 - Georgia vs Tennessee 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628421, team_name = "Georgia")
+
+# Week 13 - Georgia vs Massachusetts 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628430, team_name = "Georgia")
+
+# Week 13 - Tennessee vs UTEP
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628435, team_name = "Tennessee")
+
+# Week 13 - Texas vs Kentucky 
+team_data_cfp <- assign_favorite(team_data_cfp, game_id = 401628436, team_name = "Texas")
+```
+
+```{r}
+write.csv(team_data_cfp, "team_data_cfp.csv", row.names = FALSE)
+```
+
+```{r}
+team_data_cfp <- team_data_cfp |>
+  mutate(
+    home_wpa = home_wp_after - home_wp_before,
+    away_wpa = away_wp_after - away_wp_before
+  )
+```
+
+```{r}
+summary(team_data_cfp$home_wpa)
+summary(team_data_cfp$away_wpa)
+summary(team_data_cfp$home_EPA)
+summary(team_data_cfp$away_EPA)
+```
+
+```{r}
+team_data_cfp <- team_data_cfp |>
+  filter(
+    !is.na(home_wpa), 
+    !is.na(away_wpa), 
+    !is.na(home_EPA), 
+    !is.na(away_EPA)
+  )
+```
+
+```{r}
+team_data_cfp <- team_data_cfp %>%
+  mutate(across(c(favorite, home, away), ~str_trim(.)))  # Remove whitespace
+```
+
+```{r}
+unique(team_data_cfp$favorite)
+```
+
+```{r}
+# Function to compute Gini index
+calculate_gini <- function(values) {
+  if(length(values) > 0 && all(!is.na(values))) {
+    return(Gini(abs(values)))  # Ensure positive values
+  } else {
+    return(NA)
+  }
+}
+
+# Calculate Gini indices based on team location
+gini_results <- team_data_cfp |>
+  mutate(
+    team_wpa = if_else(favorite == home, home_wpa, away_wpa),
+    team_epa = if_else(favorite == home, home_EPA, away_EPA)
+  ) |>
+  group_by(favorite) |>
+  summarise(
+    gini_WPA = calculate_gini(team_wpa),
+    gini_EPA = calculate_gini(team_epa),
+    .groups = "drop"  # Avoid grouped output
+  )
+
+print(gini_results)
+```
+
+```{r}
+assign_favorite <- function(team_data, game_id, team_name) {
+  team_data <- team_data %>%
+    mutate(favorite = if_else(game_id == game_id & (favorite == '' | is.na(favorite)), team_name, favorite))
+  return(team_data)
+}
+
+```
+
+```{r}
+# Assign favorite teams for each game without overwriting previous entries
+games_and_favorites <- list(
+  list(game_id = 401643764, team_name = "Boise State"),
+  list(game_id = 401643769, team_name = "Boise State"),
+  list(game_id = 401673463, team_name = "SMU"),
+  list(game_id = 401673464, team_name = "Oregon"),
+  list(game_id = 401673465, team_name = "Arizona State"),
+  list(game_id = 401673468, team_name = "Boise State"),
+  list(game_id = 401673469, team_name = "Georgia"),
+  list(game_id = 401635627, team_name = "SMU"),
+  list(game_id = 401636915, team_name = "Arizona State"),
+  list(game_id = 401636917, team_name = "Arizona State"),
+  list(game_id = 401636927, team_name = "Arizona State"),
+  list(game_id = 401636930, team_name = "Arizona State"),
+  list(game_id = 401636940, team_name = "Arizona State"),
+  list(game_id = 401640959, team_name = "Notre Dame"),
+  list(game_id = 401643747, team_name = "Boise State"),
+  list(game_id = 401643752, team_name = "Boise State"),
+  list(game_id = 401643758, team_name = "Boise State"),
+  list(game_id = 401628571, team_name = "Notre Dame"),
+  list(game_id = 401628984, team_name = "Notre Dame"),
+  list(game_id = 401628985, team_name = "Notre Dame"),
+  list(game_id = 401635580, team_name = "SMU"),
+  list(game_id = 401635582, team_name = "Clemson"),
+  list(game_id = 401635600, team_name = "Clemson"),
+  list(game_id = 401635607, team_name = "Clemson"),
+  list(game_id = 401635614, team_name = "Clemson"),
+  list(game_id = 401635619, team_name = "SMU"),
+  list(game_id = 401635621, team_name = "SMU"),
+  list(game_id = 401628546, team_name = "Penn State"),
+  list(game_id = 401628550, team_name = "Ohio State"),
+  list(game_id = 401628551, team_name = "Oregon"),
+  list(game_id = 401628552, team_name = "Penn State"),
+  list(game_id = 401628555, team_name = "Ohio State"),
+  list(game_id = 401628559, team_name = "Penn State"),
+  list(game_id = 401628564, team_name = "Indiana"),
+  list(game_id = 401628565, team_name = "Penn State"),
+  list(game_id = 401628566, team_name = "Ohio State"),
+  list(game_id = 401628569, team_name = "Oregon"),
+  list(game_id = 401628439, team_name = "Georgia"),
+  list(game_id = 401628444, team_name = "Clemson"),
+  list(game_id = 401628445, team_name = "Texas"),
+  list(game_id = 401628446, team_name = "Tennessee"),
+  list(game_id = 401628534, team_name = "Indiana"),
+  list(game_id = 401628536, team_name = "Oregon"),
+  list(game_id = 401628539, team_name = "Ohio State"),
+  list(game_id = 401628541, team_name = "Indiana"),
+  list(game_id = 401628543, team_name = "Oregon"),
+  list(game_id = 401628545, team_name = "Ohio State"),
+  list(game_id = 401628408, team_name = "Georgia"),
+  list(game_id = 401628412, team_name = "Tennessee"),
+  list(game_id = 401628414, team_name = "Ole Miss"),
+  list(game_id = 401628416, team_name = "Tennessee"),
+  list(game_id = 401628417, team_name = "Texas"),
+  list(game_id = 401628419, team_name = "Texas"),
+  list(game_id = 401628421, team_name = "Georgia"),
+  list(game_id = 401628430, team_name = "Georgia"),
+  list(game_id = 401628435, team_name = "Tennessee"),
+  list(game_id = 401628436, team_name = "Texas")
+)
+
+for (game in games_and_favorites) {
+  team_data_cfp <- assign_favorite(team_data_cfp, game_id = game$game_id, team_name = game$team_name)
+}
+
+# Verify the favorite assignments
+unique_favorites <- unique(team_data_cfp$favorite)
+print(unique_favorites)
+
+```
+

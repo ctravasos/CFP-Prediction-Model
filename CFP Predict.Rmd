@@ -1,0 +1,161 @@
+---
+title: "CFP Prediction"
+author: "Collin"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+libraryies 
+```{r}
+library(data.table)
+library(tidyverse)
+library(caret)
+
+```
+
+
+
+```{r}
+load("C:/users/cstra/cfp/cfb_data_2024.rda") # Load data
+
+cfp <- cfb_2024
+```
+
+
+
+
+```{r}
+cfp_teams <- c("Oregon", "Georgia", "Boise State", "Arizona State", "Texas", 
+               "Penn State", "Notre Dame", "Ohio State", "Tennessee", 
+               "Clemson", "Indiana", "SMU")
+
+cfp_data <- cfp %>% 
+  filter(pos_team %in% cfp_teams | def_pos_team %in% cfp_teams) %>%
+  select(year, week, pos_team, def_pos_team, pos_team_score, def_pos_team_score, EPA, play_type)
+
+# Remove rows with missing values (if any)
+cfp_data <- na.omit(cfp_data)
+
+```
+
+```{r}
+cfp_data <- cfp_data %>%
+  mutate(result = ifelse(pos_team_score > def_pos_team_score, 1, 0)) %>%
+  select(-pos_team_score, -def_pos_team_score)
+
+```
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(cfp_data$result, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+cfpTrain <- cfp_data[ trainIndex,]
+cfpTest  <- cfp_data[-trainIndex,]
+
+```
+
+```{r}
+# Convert the 'result' column to a factor
+cfpTrain$result <- as.factor(cfpTrain$result)
+cfpTest$result <- as.factor(cfpTest$result)
+```
+
+```{r}
+# Train the model again
+model <- train(result ~ ., data = cfpTrain, method = "rf",
+               trControl = trainControl(method = "cv", number = 10))
+
+# Check the model
+print(model)
+
+```
+
+
+```{r}
+predictions <- predict(model, cfpTest)
+confusionMatrix(predictions, cfpTest$result)
+```
+
+```{r}
+# Create a dataframe for the first-round games with actual EPA values
+first_round_games <- data.frame(
+  year = rep(2024, 6),
+  week = rep(15, 6),
+  pos_team = c("Georgia", "Ohio State", "Clemson", "Texas", "Boise State", "Notre Dame"),
+  def_pos_team = c("Penn State", "Tennessee", "Indiana", "SMU", "Arizona State", "Oregon"),
+  EPA = c(2.1, 1.8, 1.5, 1.2, 1.1, 1.0),  # Replace these with actual EPA values
+  play_type = factor(rep("pass", 6), levels = levels(cfpTrain$play_type))
+)
+
+# Print the dataframe to check
+print(first_round_games)
+
+# Predict the first-round winners
+first_round_predictions <- predict(model, first_round_games)
+first_round_games$winner <- ifelse(first_round_predictions == 1, first_round_games$pos_team, first_round_games$def_pos_team)
+first_round_winners <- first_round_games$winner
+
+# Print the first-round winners
+print(first_round_winners)
+
+```
+
+```{r}
+# Create a dataframe for the second-round games
+second_round_games <- data.frame(
+  year = rep(2024, 4),
+  week = rep(16, 4),
+  pos_team = c("Oregon", "Georgia", "Boise State", "Ohio State"),
+  def_pos_team = first_round_winners[1:4],  # Adjust based on matchups
+  EPA = c(2.5, 2.0, 1.8, 1.7),  # Replace these with actual EPA values
+  play_type = factor(rep("pass", 4), levels = levels(cfpTrain$play_type))
+)
+
+# Print the dataframe to check
+print(second_round_games)
+
+# Predict the second-round winners
+second_round_predictions <- predict(model, second_round_games)
+second_round_games$winner <- ifelse(second_round_predictions == 1, second_round_games$pos_team, second_round_games$def_pos_team)
+second_round_winners <- second_round_games$winner
+
+# Print the second-round winners
+print(second_round_winners)
+
+```
+
+```{r}
+# Create a dataframe for the semifinals
+semifinal_games <- data.frame(
+  year = rep(2024, 2),
+  week = rep(17, 2),
+  pos_team = second_round_winners[1:2],  # Adjust based on matchups
+  def_pos_team = second_round_winners[3:4],  # Adjust based on matchups
+  EPA = c(2.8, 2.6),  # Replace these with actual EPA values
+  play_type = factor(rep("pass", 2), levels = levels(cfpTrain$play_type))
+)
+
+# Print the dataframe to check
+print(semifinal_games)
+
+# Predict the semifinal winners
+semifinal_predictions <- predict(model, semifinal_games)
+semifinal_games$winner <- ifelse(semifinal_predictions == 1, semifinal_games$pos_team, semifinal_games$def_pos_team)
+semifinal_winners <- semifinal_games$winner
+
+# Print the semifinal winners
+print(semifinal_winners)
+
+```
+
+
+
+
+
+
+

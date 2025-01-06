@@ -1,0 +1,466 @@
+---
+title: "Grow Irish CFP"
+author: "Jesse Davila"
+date: "2024-12-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2) 
+library(ggdark) 
+library(ggimage)
+library(reshape)
+library(ggridges)
+library(ggrepel)
+library(dplyr)
+library(xgboost)
+library(cfbfastR)
+library(caret)
+```
+
+```{r}
+source("C:/Users/Tyler/Downloads/sports_analytics_functions.r")
+```
+
+```{r}
+load("C:/Users/Tyler/Downloads/team_logos.rda")
+
+load("C:/Users/Tyler/Downloads/cfb_2024_data.rda")
+
+source("C:/Users/Tyler/Downloads/sports_analytics_functions.r")
+```
+
+```{r}
+colnames(cfb_2024)
+print(head(team_logos))
+
+```
+
+
+```{r}
+# Load necessary libraries
+library(cfbfastR)
+library(dplyr)
+library(xgboost)
+
+# Load play-by-play data for the 2024 season
+cfb_data <- load_cfb_pbp(seasons = 2024)
+
+# Aggregate team-level stats
+team_stats <- cfb_data %>%
+  group_by(pos_team) %>%
+  summarise(
+    EPA_offense = mean(EPA, na.rm = TRUE),
+    EPA_defense = mean(def_EPA, na.rm = TRUE),
+    win_prob = mean(wpa, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+```
+
+```{r}
+# Merge offensive and defensive stats for games
+game_data <- cfb_data %>%
+  mutate(EPA_diff = EPA - def_EPA) %>%
+  filter(!is.na(EPA_diff)) %>%
+  group_by(game_id) %>%
+  summarise(
+    pos_team = first(pos_team),
+    def_pos_team = first(def_pos_team),
+    EPA_diff = mean(EPA_diff),
+    win_loss = ifelse(mean(pos_team_score) > mean(def_pos_team_score), 1, 0),
+    .groups = "drop"
+  )
+
+```
+
+```{r}
+# Train-test split
+# Manually split the data into training and testing sets (80% training, 20% testing)
+set.seed(123)  # To ensure reproducibility
+train_index <- 1:round(0.8 * nrow(game_data))  # 80% of the data
+test_index <- (round(0.8 * nrow(game_data)) + 1):nrow(game_data)  # Remaining 20%
+
+train_data <- game_data[train_index, ]
+test_data <- game_data[test_index, ]
+
+# Prepare data matrices for XGBoost
+dtrain <- xgb.DMatrix(data = as.matrix(train_data %>% select(EPA_diff)), label = train_data$win_loss)
+dtest <- xgb.DMatrix(data = as.matrix(test_data %>% select(EPA_diff)), label = test_data$win_loss)
+
+# Train the model
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  max_depth = 6,
+  eta = 0.1
+)
+xgb_model <- xgb.train(params = params, data = dtrain, nrounds = 100, watchlist = list(train = dtrain, test = dtest), verbose = 1)
+
+set.seed(123)
+train_index <- createDataPartition(game_data$win_loss, p = 0.8, list = FALSE)
+train_data <- game_data[train_index, ]
+test_data <- game_data[-train_index, ]
+
+# Prepare data matrices for XGBoost
+dtrain <- xgb.DMatrix(data = as.matrix(train_data %>% select(EPA_diff)), label = train_data$win_loss)
+dtest <- xgb.DMatrix(data = as.matrix(test_data %>% select(EPA_diff)), label = test_data$win_loss)
+
+# Train the model
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  max_depth = 6,
+  eta = 0.1
+)
+xgb_model <- xgb.train(params = params, data = dtrain, nrounds = 100, watchlist = list(train = dtrain, test = dtest), verbose = 1)
+
+```
+
+
+```{r}
+# Define first-round matchups
+first_round <- data.frame(
+  game_id = 1:4,
+  pos_team = c("Clemson", "Tennessee", "SMU", "Indiana"),
+  def_pos_team = c("Texas", "Ohio State", "Penn State", "Notre Dame")
+)
+
+# Add team stats
+first_round <- first_round %>%
+  left_join(team_stats, by = c("pos_team" = "pos_team")) %>%
+  left_join(team_stats, by = c("def_pos_team" = "pos_team"), suffix = c("_pos", "_def")) %>%
+  mutate(EPA_diff = EPA_offense_pos - EPA_defense_def)
+
+# Predict outcomes
+first_round$win_prob <- predict(xgb_model, xgb.DMatrix(as.matrix(first_round %>% select(EPA_diff))))
+first_round <- first_round %>%
+  mutate(winner = ifelse(win_prob > 0.5, pos_team, def_pos_team))
+
+print(first_round)
+
+first_round <- first_round %>%
+  mutate(
+    upset_factor = rnorm(nrow(first_round), mean = 0, sd = 0.1),  # Small random variance
+    win_prob_with_variance = win_prob + upset_factor,  # Adjust the win_prob by the variance
+    winner = ifelse(win_prob_with_variance > 0.5, pos_team, def_pos_team)
+  )
+
+
+
+first_round <- first_round %>%
+  mutate(
+    upset_threshold = abs(EPA_diff) < 3,  # Lower EPA difference indicates a potential upset
+    win_prob_with_adjustment = ifelse(upset_threshold, win_prob + rnorm(nrow(first_round), 0, 0.2), win_prob),
+    winner = ifelse(win_prob_with_adjustment > 0.5, pos_team, def_pos_team)
+  )
+
+print(first_round)
+
+```
+```{r}
+# Define quarterfinal matchups using winners from first round
+
+second_round <- data.frame(
+  pos_team = c("SMU", "Notre Dame", "Arizona State", "Ohio State"),
+  def_pos_team = c("Boise State", "Georgia", "Texas", "Oregon")
+)
+
+# Add team stats
+second_round <- second_round %>%
+  left_join(team_stats, by = c("pos_team" = "pos_team")) %>%
+  left_join(team_stats, by = c("def_pos_team" = "pos_team"), suffix = c("_pos", "_def")) %>%
+  mutate(EPA_diff = EPA_offense_pos - EPA_defense_def)
+
+# Calculate win probability using the model
+second_round$win_prob <- predict(xgb_model, xgb.DMatrix(as.matrix(second_round %>% select(EPA_diff))))
+
+# Introduce injury factor
+injury_factor <- c("Georgia" = .75, "Oregon" = 1, "Texas" = 1, "Boise State" = 1, "SMU" = 1, "Arizona State" = 1, "Ohio State" = 1, "Notre Dame" = 1)
+
+second_round <- second_round %>%
+  mutate(
+    # Adjust win probability based on injury factor (e.g., Georgia QB injury)
+    injury_adjustment_pos = ifelse(pos_team %in% names(injury_factor), injury_factor[pos_team], 0),
+    injury_adjustment_def = ifelse(def_pos_team %in% names(injury_factor), injury_factor[def_pos_team], 0),
+    win_prob_with_injury = win_prob + injury_adjustment_pos - injury_adjustment_def,
+    
+    # Ensure that the win probability stays within the [0, 1] range
+    win_prob_with_injury = pmin(pmax(win_prob_with_injury, 0), 1)
+  )
+
+# Introduce further adjustments for upsets
+second_round <- second_round %>%
+  mutate(
+    upset_factor = rnorm(nrow(second_round), mean = 0, sd = 0.3),  # Higher randomness for upsets
+    win_prob_with_variance = win_prob_with_injury + upset_factor,  # Adjust win probability by the variance
+    upset_threshold = abs(EPA_diff) < 5,  # Close games are more prone to upsets
+    win_prob_with_adjustment = ifelse(upset_threshold, win_prob_with_variance + rnorm(nrow(second_round), 0, 0.2), win_prob_with_variance),
+    winner = ifelse(win_prob_with_adjustment > 0.5, pos_team, def_pos_team)
+  )
+
+# Print second-round results with injury factor adjustments
+print(second_round)
+
+
+
+
+```
+
+
+```{r}
+semi_finals <- data.frame(
+  pos_team = c("Notre Dame", "Texas"),
+  def_pos_team = c("SMU", "Oregon")
+)
+
+# Add team stats
+semi_finals <- semi_finals %>%
+  left_join(team_stats, by = c("pos_team" = "pos_team")) %>%
+  left_join(team_stats, by = c("def_pos_team" = "pos_team"), suffix = c("_pos", "_def")) %>%
+  mutate(EPA_diff = EPA_offense_pos - EPA_defense_def)
+
+# Calculate win probability using the model
+semi_finals$win_prob <- predict(xgb_model, xgb.DMatrix(as.matrix(semi_finals %>% select(EPA_diff))))
+
+# Introduce injury factor (Example: Georgia's QB injury)
+injury_factor <- c("Georgia" = .75, "Oregon" = 1, "Texas" = 1, "SMU" = 1, "Notre Dame" = 1)
+
+semi_finals <- semi_finals %>%
+  mutate(
+    # Adjust win probability based on injury factor
+    injury_adjustment_pos = ifelse(pos_team %in% names(injury_factor), injury_factor[pos_team], 0),
+    injury_adjustment_def = ifelse(def_pos_team %in% names(injury_factor), injury_factor[def_pos_team], 0),
+    win_prob_with_injury = win_prob + injury_adjustment_pos - injury_adjustment_def,
+    
+    # Ensure win probability stays within [0, 1]
+    win_prob_with_injury = pmin(pmax(win_prob_with_injury, 0), 1)
+  )
+
+# Introduce further adjustments for upsets
+semi_finals <- semi_finals %>%
+  mutate(
+    upset_factor = rnorm(nrow(semi_finals), mean = 0, sd = 0.3),  # Increase randomness for upsets
+    win_prob_with_variance = win_prob_with_injury + upset_factor,  # Adjust win probability by variance
+    upset_threshold = abs(EPA_diff) < 5,  # Close games are more prone to upsets
+    win_prob_with_adjustment = ifelse(upset_threshold, win_prob_with_variance + rnorm(nrow(semi_finals), 0, 0.2), win_prob_with_variance),
+    winner = ifelse(win_prob_with_adjustment > 0.5, pos_team, def_pos_team)
+  )
+
+# Print semi-finals results with injury factor adjustments
+print(semi_finals)
+
+
+
+```
+
+```{r}
+# Define final matchup
+finals <- data.frame(
+  pos_team = c("SMU"),
+  def_pos_team = c("Oregon")
+)
+
+# Add team stats for the final
+finals <- finals %>%
+  left_join(team_stats, by = c("pos_team" = "pos_team")) %>%
+  left_join(team_stats, by = c("def_pos_team" = "pos_team"), suffix = c("_pos", "_def")) %>%
+  mutate(EPA_diff = EPA_offense_pos - EPA_defense_def)
+
+# Calculate win probability using the model
+finals$win_prob <- predict(xgb_model, xgb.DMatrix(as.matrix(finals %>% select(EPA_diff))))
+
+# Apply injury adjustments (if any)
+finals <- finals %>%
+  mutate(
+    # Example: Oregon's QB injury if applicable
+    injury_adjustment_pos = ifelse(pos_team %in% names(injury_factor), injury_factor[pos_team], 0),
+    injury_adjustment_def = ifelse(def_pos_team %in% names(injury_factor), injury_factor[def_pos_team], 0),
+    win_prob_with_injury = win_prob + injury_adjustment_pos - injury_adjustment_def,
+    
+    # Ensure win probability stays within [0, 1]
+    win_prob_with_injury = pmin(pmax(win_prob_with_injury, 0), 1)
+  )
+
+# Adjust for upsets based on the close nature of the game (upset logic)
+finals <- finals %>%
+  mutate(
+    upset_factor = rnorm(nrow(finals), mean = 0, sd = 0.3),  # Increase randomness for upsets
+    win_prob_with_variance = win_prob_with_injury + upset_factor,  # Adjust win probability by variance
+    upset_threshold = abs(EPA_diff) < 5,  # Close games are more prone to upsets
+    win_prob_with_adjustment = ifelse(upset_threshold, win_prob_with_variance + rnorm(nrow(finals), 0, 0.2), win_prob_with_variance),
+    winner = ifelse(win_prob_with_adjustment > 0.5, pos_team, def_pos_team)
+  )
+
+# Print final results
+print(finals)
+
+
+
+```
+
+```{r}
+# Define quarterfinal matchups based on first-round results
+
+quarterfinals <- data.frame(
+  game_id = 5:8,
+  pos_team = c(first_round$winner[1], first_round$winner[2], first_round$winner[3], first_round$winner[4]),
+  def_pos_team = c("Arizona St.", "Oregon", "Boise State", "Georgia")
+)
+
+# Add team stats and calculate win probabilities for quarterfinals
+quarterfinals <- quarterfinals %>%
+  left_join(team_stats, by = c("pos_team" = "pos_team")) %>%
+  left_join(team_stats, by = c("def_pos_team" = "pos_team"), suffix = c("_pos", "_def")) %>%
+  mutate(EPA_diff = EPA_offense_pos - EPA_defense_def) %>%
+  mutate(
+    upset_threshold = abs(EPA_diff) < 3,  # Lower EPA difference indicates a potential upset
+    win_prob_with_adjustment = ifelse(upset_threshold, win_prob + rnorm(nrow(quarterfinals), 0, 0.2), win_prob),
+    winner = ifelse(win_prob_with_adjustment > 0.5, pos_team, def_pos_team)
+  )
+
+print(quarterfinals)
+
+
+quarterfinals <- data.frame(
+  game_id = 5:8,
+  pos_team = c(first_round$winner[1], first_round$winner[2], first_round$winner[3], first_round$winner[4]),
+  def_pos_team = c("Arizona St.", "Oregon", "Boise State", "Georgia")
+)
+
+# Add team stats and predict outcomes
+quarterfinals <- first_round %>%
+  mutate(
+    upset_threshold = abs(EPA_diff) < 3,  # Lower EPA difference indicates a potential upset
+    win_prob_with_adjustment = ifelse(upset_threshold, win_prob + rnorm(nrow(first_round), 0, 0.2), win_prob),
+    winner = ifelse(win_prob_with_adjustment > 0.5, pos_team, def_pos_team)
+  )
+
+print(quarterfinals)
+
+```
+
+```{r}
+# Define semifinal matchups based on quarterfinal winners
+semifinals <- data.frame(
+  game_id = 9:10,
+  pos_team = c(quarterfinals$winner[1], quarterfinals$winner[3]),
+  def_pos_team = c(quarterfinals$winner[2], quarterfinals$winner[4])
+)
+
+# Add team stats and predict outcomes
+semifinals <- semifinals %>%
+  left_join(team_stats, by = c("pos_team" = "pos_team")) %>%
+  left_join(team_stats, by = c("def_pos_team" = "pos_team"), suffix = c("_pos", "_def")) %>%
+  mutate(EPA_diff = EPA_offense_pos - EPA_defense_def)
+
+semifinals$win_prob <- predict(xgb_model, xgb.DMatrix(as.matrix(semifinals %>% select(EPA_diff))))
+semifinals <- semifinals %>%
+  mutate(winner = ifelse(win_prob > 0.5, pos_team, def_pos_team))
+
+print(semifinals)
+
+```
+
+```{r}
+# Define championship matchup based on semifinal winners
+championship <- data.frame(
+  game_id = 11,
+  pos_team = semifinals$winner[1],
+  def_pos_team = semifinals$winner[2]
+)
+
+# Add team stats and predict outcome
+championship <- championship %>%
+  left_join(team_stats, by = c("pos_team" = "pos_team")) %>%
+  left_join(team_stats, by = c("def_pos_team" = "pos_team"), suffix = c("_pos", "_def")) %>%
+  mutate(EPA_diff = EPA_offense_pos - EPA_defense_def)
+
+championship$win_prob <- predict(xgb_model, xgb.DMatrix(as.matrix(championship %>% select(EPA_diff))))
+championship <- championship %>%
+  mutate(winner = ifelse(win_prob > 0.5, pos_team, def_pos_team))
+
+print(championship)
+
+```
+## Redo Qtr Finals
+```{r}
+# Define quarterfinal results
+quarterfinals <- data.frame(
+  game_id = 5:8,
+  pos_team = c("Texas", "Oregon", "Penn State", "Notre Dame"), # Winners
+  def_pos_team = c("Arizona St.", "Ohio State", "Boise State", "Georgia"), # Losing teams
+  winner = c("Texas", "Oregon", "Penn State", "Notre Dame") # Manually assigned
+)
+
+print(quarterfinals)
+
+# Define semifinal matchups
+semifinals <- data.frame(
+  game_id = 9:10,
+  pos_team = c(quarterfinals$winner[1], quarterfinals$winner[3]), # Texas vs. Penn State
+  def_pos_team = c(quarterfinals$winner[2], quarterfinals$winner[4]) # Oregon vs. Notre Dame
+)
+
+print(semifinals)
+
+
+```
+
+```{r}
+# Add team stats to semifinal matchups
+semifinals <- semifinals %>%
+  left_join(team_stats, by = c("pos_team" = "pos_team")) %>%
+  left_join(team_stats, by = c("def_pos_team" = "pos_team"), suffix = c("_pos", "_def")) %>%
+  mutate(EPA_diff = EPA_offense_pos - EPA_defense_def)
+
+# Predict semifinal outcomes
+semifinals$win_prob <- predict(xgb_model, xgb.DMatrix(as.matrix(semifinals %>% select(EPA_diff))))
+semifinals <- semifinals %>%
+  mutate(winner = ifelse(win_prob > 0.5, pos_team, def_pos_team))
+
+print(semifinals)
+
+# Define championship matchup
+championship <- data.frame(
+  game_id = 11,
+  pos_team = semifinals$winner[1], # Winner of Texas vs. Penn State
+  def_pos_team = semifinals$winner[2] # Winner of Oregon vs. Notre Dame
+)
+
+print(championship)
+
+# Add team stats to championship matchup
+championship <- championship %>%
+  left_join(team_stats, by = c("pos_team" = "pos_team")) %>%
+  left_join(team_stats, by = c("def_pos_team" = "pos_team"), suffix = c("_pos", "_def")) %>%
+  mutate(EPA_diff = EPA_offense_pos - EPA_defense_def)
+
+# Predict championship outcome
+championship$win_prob <- predict(xgb_model, xgb.DMatrix(as.matrix(championship %>% select(EPA_diff))))
+championship <- championship %>%
+  mutate(winner = ifelse(win_prob > 0.5, pos_team, def_pos_team))
+
+print(championship)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
